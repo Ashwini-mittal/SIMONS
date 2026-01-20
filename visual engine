@@ -1,0 +1,142 @@
+# --- 3. VISUAL ENGINE ---
+st.markdown("""
+<style>
+    /* IMPORTS */
+    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@900&family=Rajdhani:wght@300;500;700&family=JetBrains+Mono:wght@400;700&family=Inter:wght@300;400;600&display=swap');
+    
+    /* PALETTE */
+    :root {
+        --glass-surface: rgba(20, 25, 30, 0.6);
+        --glass-border: rgba(255, 255, 255, 0.08);
+        --neon-cyan: #00F0FF;
+        --neon-danger: #FF2A6D;
+        --neon-success: #05FFA1;
+        --tech-grey: #9ca3af;
+        --void-bg: #050505;
+    }
+
+    /* BACKGROUND STRUCTURE */
+    .stApp { 
+        background-color: var(--void-bg);
+        background-image: 
+            linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px), 
+            linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+        background-size: 50px 50px;
+        font-family: 'Inter', sans-serif;
+    }
+    
+    /* Z-INDEX FIX */
+    .stApp::after {
+        content: ""; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+        background: linear-gradient(to bottom, rgba(0,243,255,0) 50%, rgba(0,243,255,0.02) 50%);
+        background-size: 100% 4px;
+        animation: scanline 20s linear infinite;
+        pointer-events: none;
+        z-index: 0; 
+    }
+    @keyframes scanline { 0% { transform: translateY(-100%); } 100% { transform: translateY(100%); } }
+
+    /* CONTENT LAYERING */
+    .main .block-container { padding-top: 1rem; padding-bottom: 5rem; z-index: 10; position: relative; }
+    
+    /* CARDS */
+    .metric-card {
+        background: var(--glass-surface);
+        border: 1px solid var(--glass-border);
+        padding: 20px; position: relative;
+        backdrop-filter: blur(10px);
+    }
+    .metric-card::before {
+        content: ''; position: absolute; top: -1px; left: -1px; width: 10px; height: 10px;
+        border-top: 2px solid var(--neon-cyan); border-left: 2px solid var(--neon-cyan);
+    }
+    
+    /* TYPOGRAPHY */
+    h1, h2, h3 { font-family: 'Rajdhani', sans-serif !important; text-transform: uppercase; letter-spacing: 2px; color: #fff; }
+    .metric-label { font-family: 'Inter'; font-size: 11px; color: var(--tech-grey); text-transform: uppercase; letter-spacing: 1px; }
+    .metric-value { font-family: 'Rajdhani'; font-size: 32px; color: #fff; font-weight: 500; }
+
+    /* HEADER */
+    .arch-header {
+        font-size: 2.5rem; color: #fff;
+        border-left: 4px solid var(--neon-cyan);
+        padding-left: 20px; margin-bottom: 10px;
+    }
+
+    /* SIDEBAR */
+    section[data-testid="stSidebar"] { background-color: #000; border-right: 1px solid var(--glass-border); z-index: 20; }
+    
+    /* PLAIN 2D LOGO */
+    .sidebar-logo {
+        font-family: 'Orbitron', sans-serif;
+        font-size: 34px;
+        font-weight: 900;
+        text-align: center;
+        color: #fff;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        margin-bottom: 25px;
+    }
+    
+    /* BUTTONS */
+    .stButton > button {
+        background: transparent; border: 1px solid var(--glass-border);
+        color: var(--tech-grey); font-family: 'Rajdhani'; font-weight: 600;
+        text-transform: uppercase; border-radius: 0; transition: all 0.3s;
+    }
+    .stButton > button:hover { border-color: var(--neon-cyan); color: var(--neon-cyan); background: rgba(0, 240, 255, 0.05); }
+    div[data-testid="column"]:nth-of-type(1) .stButton > button { border-left: 3px solid var(--neon-success); }
+    div[data-testid="column"]:nth-of-type(2) .stButton > button { border-left: 3px solid var(--neon-danger); }
+
+    /* EXPANDER STYLING */
+    .streamlit-expanderHeader {
+        background-color: rgba(255, 255, 255, 0.02) !important;
+        border: 1px solid #333 !important;
+        border-radius: 4px !important;
+        color: #fff !important;
+        font-family: 'Rajdhani', sans-serif !important;
+        font-weight: 700 !important;
+        text-transform: uppercase !important;
+        letter-spacing: 1px !important;
+    }
+    .streamlit-expanderHeader:hover {
+        border-color: var(--neon-cyan) !important;
+        color: var(--neon-cyan) !important;
+    }
+    .streamlit-expanderContent {
+        background-color: transparent !important;
+        border: 1px solid #222 !important;
+        border-top: none !important;
+        padding: 15px !important;
+    }
+
+    /* PANELS */
+    .calc-panel, .backtest-panel, .tutorial-panel {
+        background: rgba(0,0,0,0.8); border: 1px solid var(--neon-cyan);
+        padding: 20px; margin-bottom: 20px; border-radius: 4px;
+    }
+    
+    /* DATAFRAME */
+    div[data-testid="stDataFrame"] { border: 1px solid #333; }
+
+    /* TICKER */
+    .ticker-wrap {
+        position: fixed; bottom: 0; left: 0; width: 100%;
+        background-color: rgba(5, 5, 5, 0.95);
+        border-top: 1px solid var(--neon-cyan);
+        color: #fff; font-family: 'JetBrains Mono', monospace;
+        font-size: 12px; line-height: 30px; height: 30px;
+        overflow: hidden; z-index: 100; white-space: nowrap;
+        pointer-events: auto;
+    }
+    .ticker { display: inline-block; padding-left: 100%; animation: marquee 60s linear infinite; }
+    .ticker-item { display: inline-block; padding: 0 2rem; color: #ccc; cursor: pointer; }
+    .ticker-item strong { color: var(--neon-cyan); }
+    @keyframes marquee { 0% { transform: translate3d(0, 0, 0); } 100% { transform: translate3d(-100%, 0, 0); } }
+    .ticker-wrap:hover .ticker { animation-play-state: paused !important; }
+    
+    /* ORDER FLOW WIDGETS */
+    .orderflow-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #222; font-family: 'JetBrains Mono'; font-size: 11px; }
+    .whale-alert { background: rgba(0, 240, 255, 0.1); border: 1px solid var(--neon-cyan); padding: 10px; margin-top: 10px; font-size: 12px; color: #fff; text-align: center; }
+</style>
+""", unsafe_allow_html=True)
