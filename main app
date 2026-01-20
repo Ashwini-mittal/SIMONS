@@ -1,0 +1,205 @@
+# --- 9. MAIN APP ---
+
+if menu == "LIVE FEED":
+    col_head, col_btn = st.columns([4, 1])
+    with col_head:
+        st.markdown(f"""<div class="arch-header">{st.session_state.symbol} <span style="font-weight:300; opacity:0.5">// REAL-TIME</span></div>""", unsafe_allow_html=True)
+    with col_btn:
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("🔄", help="Manual Refresh"): st.rerun()
+        with c2:
+            if st.button("🧮", help="Toggle Calculator"): 
+                st.session_state.show_calc = not st.session_state.show_calc
+                st.rerun()
+            
+    df, err = get_market_data(st.session_state.symbol, timeframe, window)
+    current_p = df['close'].iloc[-1] if not df.empty else 0
+
+    if st.session_state.show_calc:
+        st.markdown('<div class="calc-panel">', unsafe_allow_html=True)
+        st.markdown("### 🧮 POSITION SIZE CALCULATOR")
+        if enable_refresh: st.caption("⚠️ Turn OFF 'Live Mode' to type comfortably.")
+        c_calc1, c_calc2, c_calc3, c_calc4 = st.columns(4)
+        with c_calc1: account_bal = st.number_input("Account Balance ($)", value=1000.0)
+        with c_calc2: risk_pct = st.number_input("Risk (%)", value=1.0, step=0.1)
+        with c_calc3: entry_p = st.number_input("Entry Price ($)", value=float(current_p))
+        with c_calc4: stop_loss = st.number_input("Stop Loss ($)", value=float(current_p * 0.99))
+        
+        if entry_p > 0 and stop_loss > 0 and entry_p != stop_loss:
+            risk_amt = account_bal * (risk_pct / 100)
+            price_diff = abs(entry_p - stop_loss)
+            pos_size_units = risk_amt / price_diff
+            pos_val_usd = pos_size_units * entry_p
+            st.markdown("---")
+            res1, res2, res3 = st.columns(3)
+            with res1: st.metric("RISK AMOUNT", f"${risk_amt:.2f}")
+            with res2: st.metric("POSITION SIZE", f"{pos_size_units:.4f}")
+            with res3: st.metric("TOTAL VALUE", f"${pos_val_usd:.2f}")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    news_list = get_crypto_news(st.session_state.symbol)
+    news_html = "".join([f'<div class="ticker-item"><strong>>></strong> {n}</div>' for n in news_list])
+    st.markdown(f"""<div class="ticker-wrap"><div class="ticker">{news_html}</div></div>""", unsafe_allow_html=True)
+
+    if not df.empty:
+        curr_price = df['close'].iloc[-1]
+        z_score = df['Z_Score'].iloc[-1]
+        
+        signal_text = "MONITORING"; signal_color = "#9ca3af"; accent_style = "border: 1px solid rgba(255,255,255,0.1);"
+        
+        # --- SIGNAL LOGIC ---
+        new_signal = "MONITORING"
+        if z_score < -entry_z: 
+            new_signal = "ENTRY LONG"
+            signal_text = "ENTRY LONG"; signal_color = "#05FFA1"; accent_style = "border: 1px solid #05FFA1; box-shadow: 0 0 15px rgba(5,255,161,0.2);"
+        elif z_score > entry_z: 
+            new_signal = "ENTRY SHORT"
+            signal_text = "ENTRY SHORT"; signal_color = "#FF2A6D"; accent_style = "border: 1px solid #FF2A6D; box-shadow: 0 0 15px rgba(255,42,109,0.2);"
+        
+        # Check if signal changed (Spam Protection)
+        if new_signal != "MONITORING" and new_signal != st.session_state.last_alert_signal:
+            alert_msg = f"🚨 SIMONS ALERT: {st.session_state.symbol}\n\nSIGNAL: {new_signal}\nPRICE: ${curr_price:,.2f}\nZ-SCORE: {z_score:.2f}"
+            send_telegram_alert(tg_token, tg_chat, alert_msg)
+            st.session_state.last_alert_signal = new_signal # Update state so we don't send again
+            st.toast(f"Telegram Alert Sent: {new_signal}", icon="🔔")
+        elif new_signal == "MONITORING":
+            st.session_state.last_alert_signal = "MONITORING" # Reset if price goes back to normal
+        # ---------------------------------------
+
+        c1, c2, c3, c4 = st.columns(4)
+        with c1: st.markdown(f"""<div class="metric-card" style="{accent_style}"><div class="metric-label">ALGO STATUS</div><div class="metric-value" style="color:{signal_color}">{signal_text}</div></div>""", unsafe_allow_html=True)
+        with c2: st.markdown(f"""<div class="metric-card"><div class="metric-label">LAST PRICE</div><div class="metric-value">${curr_price:,.2f}</div></div>""", unsafe_allow_html=True)
+        with c3: st.markdown(f"""<div class="metric-card"><div class="metric-label">STD DEVIATION (Z)</div><div class="metric-value">{z_score:.2f}σ</div></div>""", unsafe_allow_html=True)
+        with c4: st.markdown(f"""<div class="metric-card"><div class="metric-label">VOLATILITY</div><div class="metric-value" style="color:#eab308">{df["StdDev"].iloc[-1]:.2f}</div></div>""", unsafe_allow_html=True)
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['Mean'] + (df['StdDev']*entry_z), line=dict(color='rgba(255, 255, 255, 0.1)', width=1), showlegend=False))
+        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['Mean'] - (df['StdDev']*entry_z), line=dict(color='rgba(255, 255, 255, 0.1)', width=1), fill='tonexty', fillcolor='rgba(255, 255, 255, 0.02)', showlegend=False))
+        fig.add_trace(go.Candlestick(x=df['timestamp'], open=df['open'], high=df['high'], low=df['low'], close=df['close'], increasing_line_color='#05FFA1', decreasing_line_color='#FF2A6D', increasing_fillcolor='rgba(5, 255, 161, 0.1)', decreasing_fillcolor='rgba(255, 42, 109, 0.1)', name='Price'))
+        vp_df = calculate_volume_profile(df)
+        fig = render_volume_profile(fig, vp_df, df['timestamp'].min(), df['timestamp'].max())
+        
+        active = st.session_state.active_trade
+        if active:
+            ep = active['entry']
+            fig.add_hline(y=ep, line_dash="solid", line_color="#fff", annotation_text="ENTRY", annotation_position="top left")
+            fig.add_hline(y=ep*(0.98 if active['side']=="LONG" else 1.02), line_dash="dash", line_color="#FF2A6D")
+            fig.add_hline(y=ep*(1.04 if active['side']=="LONG" else 0.96), line_dash="dash", line_color="#05FFA1")
+
+        fig.update_layout(height=600, template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(family="JetBrains Mono", size=10), margin=dict(l=0, r=50, t=30, b=0), xaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.05)", gridwidth=1), yaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.05)", gridwidth=1, side="right"), showlegend=False)
+        st.plotly_chart(fig, use_container_width=True)
+        
+        c1, c2, c3 = st.columns([1,1,2])
+        with c1: 
+            if st.button("EXECUTE LONG"): st.session_state.active_trade = {'symbol': st.session_state.symbol, 'side': 'LONG', 'entry': curr_price}; st.rerun()
+        with c2: 
+            if st.button("EXECUTE SHORT"): st.session_state.active_trade = {'symbol': st.session_state.symbol, 'side': 'SHORT', 'entry': curr_price}; st.rerun()
+        with c3:
+            if active:
+                pnl = ((curr_price - active['entry']) / active['entry']) * 100 * (1 if active['side']=='LONG' else -1)
+                pnl_col = "#05FFA1" if pnl > 0 else "#FF2A6D"
+                st.markdown(f"""<div style="background:rgba(255,255,255,0.05); padding:10px; border:1px solid #333; display:flex; justify-content:space-between; align-items:center;"><span style="font-size:12px; color:#888;">ACTIVE PNL</span><span style="font-size:20px; font-weight:bold; font-family:'Rajdhani'; color:{pnl_col}">{pnl:+.2f}%</span></div>""", unsafe_allow_html=True)
+                if st.button("CLOSE POSITION"): st.session_state.active_trade = None; st.rerun()
+    else:
+        # Fallback if initial fetch fails
+        st.error(f"DATA FEED DISCONNECTED. ERROR: {err}")
+        st.info("Try refreshing the page or checking your internet connection.")
+
+    if enable_refresh:
+        time.sleep(5)
+        st.rerun()
+
+elif menu == "STRATEGY LAB":
+    st.markdown(f"""<div class="arch-header">DEEP BACKTEST <span style="font-weight:300; opacity:0.5">// {st.session_state.symbol}</span></div>""", unsafe_allow_html=True)
+    
+    st.markdown('<div class="backtest-panel">', unsafe_allow_html=True)
+    c1, c2 = st.columns([3, 1])
+    with c1: st.write("The engine will fetch 1000 candles and simulate the strategy execution over historical data.")
+    with c2: 
+        if st.button("🚀 RUN SIMULATION"):
+            with st.spinner("Processing market data..."):
+                hist_df, err = get_market_data(st.session_state.symbol, timeframe, window, limit=1000)
+                if not hist_df.empty:
+                    trade_log, equity_curve = run_backtest(hist_df, entry_z)
+                    
+                    if not trade_log.empty:
+                        final_eq = equity_curve[-1]
+                        total_ret = ((final_eq - 1000) / 1000) * 100
+                        win_rate = len(trade_log[trade_log['PnL'] > 0]) / len(trade_log) * 100
+                        eq_series = pd.Series(equity_curve)
+                        roll_max = eq_series.cummax()
+                        drawdown = (eq_series - roll_max) / roll_max * 100
+                        max_dd = drawdown.min()
+                        
+                        st.success("SIMULATION SUCCESSFUL")
+                        m1, m2, m3, m4 = st.columns(4)
+                        with m1: st.metric("NET PROFIT", f"{total_ret:.2f}%")
+                        with m2: st.metric("WIN RATE", f"{win_rate:.1f}%")
+                        with m3: st.metric("MAX DRAWDOWN", f"{max_dd:.2f}%")
+                        with m4: st.metric("TOTAL TRADES", len(trade_log))
+                        
+                        fig = go.Figure()
+                        fig.add_trace(go.Scatter(y=equity_curve, mode='lines', line=dict(color='#00F0FF', width=2), fill='tozeroy', fillcolor='rgba(0, 240, 255, 0.1)'))
+                        fig.update_layout(title="EQUITY CURVE", template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=0, r=0, t=30, b=0), height=300)
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        metrics = {'ret': total_ret, 'wr': win_rate, 'dd': max_dd, 'tr': len(trade_log)}
+                        html_report = generate_html_report(st.session_state.symbol, timeframe, metrics, trade_log)
+                        b64 = base64.b64encode(html_report.encode()).decode()
+                        href = f'<a href="data:text/html;base64,{b64}" download="SIMONS_REPORT_{st.session_state.symbol}.html" style="text-decoration:none;"><button style="width:100%; background:var(--glass-surface); color:#fff; border:1px solid var(--neon-cyan); padding:10px; font-weight:bold; cursor:pointer; font-family:Rajdhani; text-transform:uppercase;">🖨️ PRINT / SAVE REPORT</button></a>'
+                        st.markdown(href, unsafe_allow_html=True)
+                        
+                        st.subheader("TRADE AUDIT LOG")
+                        st.dataframe(trade_log[['Date', 'Type', 'Entry', 'Exit', 'PnL', 'Result']], use_container_width=True, column_config={"Date": st.column_config.DatetimeColumn(format="D MMM YYYY, h:mm a"), "Entry": st.column_config.NumberColumn(format="$%.2f"), "Exit": st.column_config.NumberColumn(format="$%.2f"), "PnL": st.column_config.NumberColumn(format="%.2f%%")})
+                    else: st.warning("No trades found in this period. Adjust threshold.")
+                else: st.error("Data fetch error.")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+elif menu == "TUTORIAL":
+    st.markdown(f"""<div class="arch-header">SYSTEM MANUAL <span style="font-weight:300; opacity:0.5">// GUIDE</span></div>""", unsafe_allow_html=True)
+    st.markdown('<div class="tutorial-panel">', unsafe_allow_html=True)
+    
+    st.subheader("1. READING THE ALGORITHM")
+    st.markdown("""
+    The core strategy relies on **Statistical Mean Reversion** (Z-Score).
+    * **Z-Score < -2.0:** Price is statistically "Oversold". The bot looks for a **LONG** entry.
+    * **Z-Score > 2.0:** Price is statistically "Overbought". The bot looks for a **SHORT** entry.
+    * **White Line (Mean):** This is the "Fair Value". Price tends to return here after an extension.
+    """)
+    
+    st.divider()
+    
+    st.subheader("2. INSTITUTIONAL ORDER FLOW (SIDEBAR)")
+    st.markdown("""
+    Use the sidebar widget to confirm the algorithm's signals with real market data.
+    
+    * **WHALE WALLS:**
+        * <span style="color:#05FFA1">**BUY WALL DETECTED:**</span> Massive limit orders waiting to buy below. Good support for LONGS.
+        * <span style="color:#FF2A6D">**SELL WALL DETECTED:**</span> Massive limit orders waiting to sell above. Good resistance for SHORTS.
+    
+    * **IMBALANCE METER:**
+        * Shows the ratio of Buyers vs Sellers in the top 20 order book levels.
+        * **> 60% BUY:** Bullish pressure.
+        * **> 60% SELL:** Bearish pressure.
+    """)
+    
+    st.divider()
+    
+    st.subheader("3. PRO TRADING STRATEGY (CONFLUENCE)")
+    st.info("💡 **GOLDEN RULE:** Only take a trade when the ALGO SIGNAL matches the ORDER FLOW.")
+    
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("**✅ HIGH PROBABILITY LONG:**")
+        st.markdown("- Algo Status: **ENTRY LONG**")
+        st.markdown("- Whale Alert: **BUY WALL**")
+        st.markdown("- Imbalance: **> 55% BUY**")
+    with c2:
+        st.markdown("**✅ HIGH PROBABILITY SHORT:**")
+        st.markdown("- Algo Status: **ENTRY SHORT**")
+        st.markdown("- Whale Alert: **SELL WALL**")
+        st.markdown("- Imbalance: **> 55% SELL**")
+        
+    st.markdown('</div>', unsafe_allow_html=True)
