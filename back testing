@@ -1,0 +1,47 @@
+# --- 7. BACKTEST ENGINE & REPORTING ---
+
+def run_backtest(df, entry_z):
+    """
+    Iterative Backtest Engine. 
+    Simulates trades based on historical Z-Score signals.
+    Prevents look-ahead bias by iterating row-by-row.
+    """
+    balance = 1000
+    equity = [balance]
+    position = 0; entry_price = 0; trades = []
+    
+    for i in range(20, len(df)):
+        row = df.iloc[i]
+        z = row['Z_Score']; price = row['close']; ts = row['timestamp']
+        if pd.isna(z): continue
+        
+        if position == 0:
+            if z < -entry_z:
+                position = 1; entry_price = price
+                trades.append({'Date': ts, 'Type': 'LONG', 'Entry': price, 'Exit': np.nan, 'PnL': np.nan, 'Result': 'OPEN'})
+            elif z > entry_z:
+                position = -1; entry_price = price
+                trades.append({'Date': ts, 'Type': 'SHORT', 'Entry': price, 'Exit': np.nan, 'PnL': np.nan, 'Result': 'OPEN'})
+        elif position == 1: # Long
+            if z > -0.5: 
+                pnl_pct = (price - entry_price) / entry_price * 100
+                balance = balance * (1 + pnl_pct/100)
+                trades[-1]['Exit'] = price; trades[-1]['PnL'] = round(pnl_pct, 2); trades[-1]['Result'] = 'WIN' if pnl_pct > 0 else 'LOSS'
+                position = 0
+        elif position == -1: # Short
+            if z < 0.5:
+                pnl_pct = (entry_price - price) / entry_price * 100
+                balance = balance * (1 + pnl_pct/100)
+                trades[-1]['Exit'] = price; trades[-1]['PnL'] = round(pnl_pct, 2); trades[-1]['Result'] = 'WIN' if pnl_pct > 0 else 'LOSS'
+                position = 0
+        equity.append(balance)
+    
+    trade_df = pd.DataFrame(trades)
+    if not trade_df.empty: trade_df = trade_df.dropna()
+    return trade_df, equity
+
+def generate_html_report(symbol, timeframe, metrics, trade_df):
+    html = f"""<html><head><style>body{{background:#050505;color:#e0e0e0;font-family:'Courier New',monospace;padding:40px;}}h1{{color:#00F0FF;border-bottom:2px solid #00F0FF;}}table{{width:100%;border-collapse:collapse;margin-top:20px;border:1px solid #333;}}th,td{{border:1px solid #333;padding:12px;}}th{{background:#1a1a1a;color:#00F0FF;}}.WIN{{color:#05FFA1;}}.LOSS{{color:#FF2A6D;}}</style></head><body><h1>SIMONS // REPORT</h1><div>SYMBOL: {symbol} | TF: {timeframe}</div><br><div>NET PROFIT: {metrics['ret']:.2f}% | WIN RATE: {metrics['wr']:.1f}%</div><table><thead><tr><th>DATE</th><th>TYPE</th><th>ENTRY</th><th>EXIT</th><th>PNL</th></tr></thead><tbody>"""
+    for i, r in trade_df.iterrows(): html += f"<tr><td>{r['Date']}</td><td>{r['Type']}</td><td>{r['Entry']:.2f}</td><td>{r['Exit']:.2f}</td><td class='{r['Result']}'>{r['PnL']}%</td></tr>"
+    html += "</tbody></table></body></html>"
+    return html
