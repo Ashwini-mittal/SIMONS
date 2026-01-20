@@ -1,0 +1,89 @@
+# --- 4. DATA ENGINE ---
+
+@st.cache_data(ttl=5) 
+def get_market_data(sym, tf, window, limit=300):
+    """
+    Fetches OHLCV data from Kraken, calculates Z-Score, and detects volatility.
+    
+    Args:
+        sym (str): Trading pair symbol (e.g., 'BTC/USD').
+        tf (str): Timeframe (e.g., '15m').
+        window (int): Rolling window for Mean/StdDev calculation.
+    
+    Returns:
+        df (DataFrame): Processed data with Z-Score.
+        error (str): Error message if API fails.
+    """
+    try:
+        # We use Kraken because it provides reliable US-compliant data
+        exchange = ccxt.kraken({'enableRateLimit': True}) 
+        bars = exchange.fetch_ohlcv(sym, timeframe=tf, limit=limit)
+        df = pd.DataFrame(bars, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+            
+        if not df.empty:
+            # --- QUANT LOGIC: STATISTICAL MEAN REVERSION ---
+            df['Mean'] = df['close'].rolling(window).mean()
+            df['StdDev'] = df['close'].rolling(window).std()
+            df['Z_Score'] = (df['close'] - df['Mean']) / df['StdDev']
+            # Volatility Expansion Logic
+            df['Prev_StdDev'] = df['StdDev'].shift(1)
+            df['Vol_Expansion'] = df['StdDev'] > (df['Prev_StdDev'] * 1.4)
+        return df, None
+    except Exception as e:
+        return pd.DataFrame(), str(e)
+
+@st.cache_data(ttl=5)
+def get_order_book(sym):
+    """
+    Fetches Level 2 Depth (Order Book) to detect Whale Walls and Imbalance.
+    
+    Returns:
+        bids, asks (DataFrame): Top 20 Buy/Sell orders.
+        imbalance (float): Ratio of buying vs selling pressure (-1 to 1).
+    """
+    try:
+        exchange = ccxt.kraken({'enableRateLimit': True})
+        ob = exchange.fetch_order_book(sym, limit=20)
+        
+        # [FIX] Kraken/CCXT sometimes return [price, vol, timestamp]
+        # We explicitly slice [:2] to ensure we only get Price and Size.
+        b_data = [x[:2] for x in ob['bids']]
+        a_data = [x[:2] for x in ob['asks']]
+        
+        bids = pd.DataFrame(b_data, columns=['price', 'size'])
+        asks = pd.DataFrame(a_data, columns=['price', 'size'])
+        
+        bid_vol = bids['size'].sum(); ask_vol = asks['size'].sum()
+        total = bid_vol + ask_vol
+        imbalance = (bid_vol - ask_vol) / total if total > 0 else 0
+        return bids, asks, imbalance, bid_vol, ask_vol, None # No error
+    except Exception as e:
+        # Return error string for debugging
+        return pd.DataFrame(), pd.DataFrame(), 0, 0, 0, str(e)
+
+@st.cache_data(ttl=300) 
+def calculate_volume_profile(df, bins=40):
+    """
+    Calculates Volume Profile by bucketing volume into price bins.
+    Used to visualize high-interest trading zones.
+    """
+    if df.empty: return pd.DataFrame()
+    p_min = df['low'].min(); p_max = df['high'].max()
+    bin_size = (p_max - p_min) / bins
+    df['bin'] = ((df['close'] - p_min) / bin_size).astype(int)
+    vp = df.groupby('bin')['volume'].sum().reset_index()
+    vp['price_level'] = p_min + (vp['bin'] * bin_size)
+    vp['norm_vol'] = vp['volume'] / vp['volume'].max()
+    return vp
+
+def get_crypto_news(symbol):
+    now = datetime.now()
+    if now - st.session_state.last_news_fetch > timedelta(minutes=5):
+        try:
+            url = "https://min-api.cryptocompare.com/data/v2/news/?lang=EN"
+            data = requests.get(url).json().get('Data', [])[:10]
+            st.session_state.news_cache = [f"[{i['source_info']['name']}] {i['title']}" for i in data]
+            st.session_state.last_news_fetch = now
+        except: pass
+    return st.session_state.news_cache
